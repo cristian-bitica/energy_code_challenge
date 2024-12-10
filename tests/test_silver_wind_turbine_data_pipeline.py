@@ -10,12 +10,52 @@ from silver_wind_turbine_data_pipeline import (
     DeltaTable,
     add_mean_and_std_dev_to_df,
     add_upper_and_lower_boundaries_of_2_std_dev_to_df,
+    deduplicate_dataset,
     drop_helper_columns,
     fill_nulls_with_mean_value,
     filter_for_newly_arrived_data,
+    main,
     merge_dataset_into_table,
     replace_outliers_with_mean_value,
 )
+
+
+@pytest.mark.parametrize(
+    argnames="input_data",
+    argvalues=[
+        [
+            [1, datetime(2024, 3, 7, 1, 0, 0), datetime(2024, 3, 8, 2, 0, 0)],
+            [1, datetime(2024, 3, 7, 2, 0, 0), datetime(2024, 3, 8, 2, 0, 0)],
+            # duplicate measurement here
+            [1, datetime(2024, 3, 7, 2, 0, 0), datetime(2024, 3, 9, 3, 0, 0)],
+            [2, datetime(2024, 3, 7, 1, 0, 0), datetime(2024, 3, 8, 2, 0, 0)],
+            [2, datetime(2024, 3, 7, 2, 0, 0), datetime(2024, 3, 8, 2, 0, 0)],
+        ],
+        [
+            [1, datetime(2024, 3, 7, 1, 0, 0), datetime(2024, 3, 8, 2, 0, 0)],
+            [1, datetime(2024, 3, 7, 2, 0, 0), datetime(2024, 3, 8, 2, 0, 0)],
+            [2, datetime(2024, 3, 7, 1, 0, 0), datetime(2024, 3, 8, 2, 0, 0)],
+            [2, datetime(2024, 3, 7, 2, 0, 0), datetime(2024, 3, 8, 2, 0, 0)],
+        ],
+    ],
+)
+def test_deduplicate_dataset(spark_session, input_data):
+    input_df = spark_session.createDataFrame(
+        input_data,
+        "turbine_id integer, timestamp timestamp, date_created timestamp",
+    )
+    expected_df = spark_session.createDataFrame(
+        [
+            [1, datetime(2024, 3, 7, 1, 0, 0), datetime(2024, 3, 8, 2, 0, 0)],
+            [1, datetime(2024, 3, 7, 2, 0, 0), datetime(2024, 3, 8, 2, 0, 0)],
+            [2, datetime(2024, 3, 7, 1, 0, 0), datetime(2024, 3, 8, 2, 0, 0)],
+            [2, datetime(2024, 3, 7, 2, 0, 0), datetime(2024, 3, 8, 2, 0, 0)],
+        ],
+        "turbine_id integer, timestamp timestamp, date_created timestamp",
+    )
+    actual_df = deduplicate_dataset(input_df)
+
+    assertDataFrameEqual(actual=actual_df, expected=expected_df)
 
 
 @pytest.mark.parametrize(
@@ -267,23 +307,61 @@ def test_merge_dataset_into_table_hits_expected_calls(
     mocked_delta_table.assert_has_calls(expected_calls)
 
 
-def test_main_e2e(spark_session):
+def test_main_e2e(spark_session, monkeypatch: MonkeyPatch):
+    input_data = [
+        [
+            datetime(2022, 3, 1, 1, 0, 0),
+            1,
+            12.8,
+            190,
+            2.5,
+            datetime(2022, 3, 2, 1, 0, 0),
+        ],
+        [
+            datetime(2022, 3, 1, 1, 0, 0),
+            2,
+            13.6,
+            12,
+            2.0,
+            datetime(2022, 3, 2, 1, 0, 0),
+        ],
+        [
+            datetime(2022, 3, 1, 1, 0, 0),
+            3,
+            10.8,
+            335,
+            2.9,
+            datetime(2022, 3, 2, 1, 0, 0),
+        ],
+    ]
+    input_df = spark_session.createDataFrame(
+        input_data,
+        "timestamp timestamp, turbine_id integer, wind_speed double, wind_direction integer, power_output double, date_created timestamp",
+    )
 
-    table_name = "bronze_wind_turbine_data"
+    monkeypatch.setattr(
+        "silver_wind_turbine_data_pipeline.read_table",
+        lambda _, _: input_df,
+    )
 
-    spark_session.sql(f"DROP TABLE IF EXISTS {table_name}")
+    spark_session.sql(
+        f"DROP TABLE IF EXISTS {silver_wind_turbine_data_pipeline.TARGET_TABLE_NAME}"
+    )
     spark_session.sql(
         f"""
-        CREATE TABLE IF NOT EXISTS {table_name}
+        CREATE TABLE IF NOT EXISTS {silver_wind_turbine_data_pipeline.TARGET_TABLE_NAME}
         (`timestamp` timestamp, turbine_id integer, wind_speed double, wind_direction integer, power_output double, date_created timestamp)
         USING DELTA
         """
     )
-    spark_session.sql(
-        f"""
-        INSERT INTO {table_name} VALUES
-        (to_timestamp('2022-03-01 00:00:00'), 1, 11.8, 169, 2.7, to_timestamp('2024-03-01 00:00:00')),
-        (to_timestamp('2022-03-01 00:00:00'), 2, 11.6, 24, 2.2, to_timestamp('2024-03-01 00:00:00')),
-        (to_timestamp('2022-03-01 00:00:00'), 3, 13.8, 335, 2.3, to_timestamp('2024-03-01 00:00:00'))
-        """
+    main()
+
+    actual_df = spark_session.read.table(
+        silver_wind_turbine_data_pipeline.TARGET_TABLE_NAME
     )
+    expected_df = spark_session.createDataFrame(
+        input_data,
+        "timestamp timestamp, turbine_id integer, wind_speed double, wind_direction integer, power_output double, date_created timestamp",
+    )
+
+    assertDataFrameEqual(actual=actual_df, expected=expected_df)

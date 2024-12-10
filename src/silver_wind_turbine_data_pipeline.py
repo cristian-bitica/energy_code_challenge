@@ -1,14 +1,22 @@
 from delta import DeltaTable
 from pyspark.sql import SparkSession
 from pyspark.sql.dataframe import DataFrame
-from pyspark.sql.functions import coalesce, col, max, mean, stddev, when
+from pyspark.sql.functions import coalesce, col, max, mean, rank, stddev, when
 from pyspark.sql.window import Window
 
 INPUT_TABLE_NAME = "bronze_wind_turbine_measurements"
 TARGET_TABLE_NAME = "silver_wind_turbine_measurements"
 
 
-# ToDo: implement deduplication logic
+def read_table(spark: SparkSession, table_name: str) -> DataFrame:
+    return spark.read.table(table_name)
+
+
+def deduplicate_dataset(df: DataFrame) -> DataFrame:
+    window = Window.partitionBy("turbine_id", "timestamp").orderBy(
+        col("date_created").desc()
+    )
+    return df.withColumn("_rank", rank().over(window)).drop("_rank")
 
 
 def filter_for_newly_arrived_data(spark: SparkSession, df: DataFrame) -> DataFrame:
@@ -89,12 +97,13 @@ def merge_dataset_into_table(
 def main():
     spark = SparkSession.getActiveSession()
     # EXTRACT
-    bronze_data_df = spark.read.table(INPUT_TABLE_NAME)
+    bronze_data_df = read_table(spark, INPUT_TABLE_NAME)
     newly_arrived_bronze_df = filter_for_newly_arrived_data(spark, bronze_data_df)
+    deduplicated_bronze_df = deduplicate_dataset(newly_arrived_bronze_df)
 
     # TRANSFORM
     with_mean_and_stddev_df = add_mean_and_std_dev_to_df(
-        newly_arrived_bronze_df, column_name="power_output", partition_by=["turbine_id"]
+        deduplicated_bronze_df, column_name="power_output", partition_by=["turbine_id"]
     )
     filled_nulls_df = fill_nulls_with_mean_value(
         df=with_mean_and_stddev_df, colum_name="power_output"
