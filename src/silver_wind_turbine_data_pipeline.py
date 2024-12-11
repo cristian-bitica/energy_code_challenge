@@ -3,18 +3,30 @@ from pyspark.sql import SparkSession
 from pyspark.sql.dataframe import DataFrame
 from pyspark.sql.functions import coalesce, col, max, mean, rank, stddev, when
 from pyspark.sql.window import Window
-from utils import read_table, merge_all_dataset_into_table
+
+from src.utils import (
+    create_delta_table_if_not_exists,
+    merge_all_dataset_into_table,
+    read_table,
+)
 
 INPUT_TABLE_NAME = "bronze_wind_turbine_measurements"
 TARGET_TABLE_NAME = "silver_wind_turbine_measurements"
-
+TARGET_TABLE_SCHEMA = """
+    `timestamp` timestamp,
+    turbine_id integer,
+    wind_speed double,
+    wind_direction integer,
+    power_output double,
+    date_created timestamp
+    """
 
 
 def deduplicate_dataset(df: DataFrame) -> DataFrame:
     window = Window.partitionBy("turbine_id", "timestamp").orderBy(
         col("date_created").desc()
     )
-    return df.withColumn("_rank", rank().over(window)).drop("_rank")
+    return df.withColumn("_rank", rank().over(window)).filter("_rank = 1").drop("_rank")
 
 
 def filter_for_newly_arrived_data(spark: SparkSession, df: DataFrame) -> DataFrame:
@@ -81,6 +93,10 @@ def drop_helper_columns(df: DataFrame) -> DataFrame:
 
 def main():
     spark = SparkSession.getActiveSession()
+    create_delta_table_if_not_exists(
+        spark=spark, table_name=TARGET_TABLE_NAME, schema=TARGET_TABLE_SCHEMA
+    )
+
     # EXTRACT
     bronze_data_df = read_table(spark, INPUT_TABLE_NAME)
     newly_arrived_bronze_df = filter_for_newly_arrived_data(spark, bronze_data_df)
@@ -102,8 +118,12 @@ def main():
     cleaned_df = drop_helper_columns(df=corrected_outliers_df)
 
     # LOAD
+
     merge_all_dataset_into_table(
-        spark=spark, df=cleaned_df, target_table_name=TARGET_TABLE_NAME
+        spark=spark,
+        df=cleaned_df,
+        target_table_name=TARGET_TABLE_NAME,
+        merge_cols=["timestamp", "turbine_id"],
     )
 
 

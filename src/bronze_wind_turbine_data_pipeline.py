@@ -16,8 +16,8 @@ def append_dataset_to_delta_table(
     options = {}
     if external_location:
         options["path"] = external_location
-    df.write.format("delta").mode("append").options(**options).saveAsTable(
-        target_table_name
+    df.write.saveAsTable(
+        name=target_table_name, format="delta", mode="append", **options
     )
 
 

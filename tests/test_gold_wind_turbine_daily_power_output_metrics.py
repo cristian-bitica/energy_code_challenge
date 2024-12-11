@@ -51,14 +51,14 @@ def test_add_daily_power_output_metrics(spark_session):
         input_data, "`date` date, turbine_id integer, power_output double"
     )
     expected_data = [
-        [datetime(2024, 1, 1), 1, 2.2, 2.5, 2.33],
-        [datetime(2024, 1, 1), 2, 1.5, 2.1, 1.8],
-        [datetime(2024, 1, 2), 1, 2.5, 3.4, 3.0],
-        [datetime(2024, 1, 2), 2, 3.8, 4.3, 4.03],
+        [1, datetime(2024, 1, 1), 2.2, 2.5, 2.33],
+        [2, datetime(2024, 1, 1), 1.5, 2.1, 1.8],
+        [1, datetime(2024, 1, 2), 2.5, 3.4, 3.0],
+        [2, datetime(2024, 1, 2), 3.8, 4.3, 4.03],
     ]
     expected_df = spark_session.createDataFrame(
         expected_data,
-        "`date` date, turbine_id integer, power_output_daily_min double, power_output_daily_max double, power_output_daily_mean double",
+        "turbine_id integer, `date` date, power_output_daily_min double, power_output_daily_max double, power_output_daily_mean double",
     )
     actual_df = add_daily_power_output_metrics(input_df)
     assertDataFrameEqual(actual_df, expected_df)
@@ -97,8 +97,8 @@ def test_main_e2e(spark_session, monkeypatch: MonkeyPatch):
     )
 
     monkeypatch.setattr(
-        "silver_wind_turbine_data_pipeline.read_table",
-        lambda _, _: input_df,
+        "gold_wind_turbine_daily_power_output_metrics.read_table",
+        lambda x, y: input_df,
     )
 
     spark_session.sql(
@@ -117,9 +117,9 @@ def test_main_e2e(spark_session, monkeypatch: MonkeyPatch):
         gold_wind_turbine_daily_power_output_metrics.TARGET_TABLE_NAME
     )
     expected_data = [
-        [datetime(2022, 3, 1), 1, 2.5, 2.5, 2.5],
-        [datetime(2022, 3, 1), 2, 2.0, 2.0, 2.0],
-        [datetime(2022, 3, 1), 3, 2.9, 2.9, 2.9],
+        [1, datetime(2022, 3, 1), 2.5, 2.5, 2.5],
+        [2, datetime(2022, 3, 1), 2.0, 2.0, 2.0],
+        [3, datetime(2022, 3, 1), 2.9, 2.9, 2.9],
     ]
     expected_df = spark_session.createDataFrame(
         expected_data,

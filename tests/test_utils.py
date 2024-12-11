@@ -5,7 +5,6 @@ from utils import (
     DeltaTable,
     _build_merge_condition,
     merge_all_dataset_into_table,
-    read_table,
 )
 
 
@@ -57,29 +56,35 @@ def test_merge_all_dataset_into_table_raises_value_error_table_not_found(spark_s
 
 
 def test_merge_all_dataset_into_table_hits_expected_calls(
-    spark_session, mocker: MockerFixture
+    spark_session, mocker: MockerFixture, monkeypatch
 ):
-
+    monkeypatch.setattr(
+        "utils._build_merge_condition",
+        lambda x: 'source.turbine_id = target.turbine_id and source.timestamp = target.timestamp'
+    )
     input_df = spark_session.createDataFrame(
         [],
         "`timestamp` timestamp, turbine_id integer, power_output double",
     )
     mocked_delta_table = mocker.Mock()
-    mocker.patch.object(DeltaTable, "read", mocked_delta_table)
+    mocker.patch.object(DeltaTable, "forName", lambda sparkSession, tableOrViewName: mocked_delta_table)
+
+    merge_all_dataset_into_table(
+        spark=spark_session,
+        df=input_df,
+        target_table_name="dummy_table",
+        merge_cols=["turbine_id", "timestamp"]
+    )
 
     expected_calls = [
-        mocker.call.alias("target"),
+        mocker.call.alias('target'),
         mocker.call.alias().merge(
             input_df,
-            "source.turbine_id = target.turbine_id and source.timestamp = target.timestamp",
+            condition='source.turbine_id = target.turbine_id and source.timestamp = target.timestamp'
         ),
         mocker.call.alias().merge().whenMatchedUpdateAll(),
         mocker.call.alias().merge().whenMatchedUpdateAll().whenNotMatchedInsertAll(),
-        mocker.call.alias()
-        .merge()
-        .whenMatchedUpdateAll()
-        .whenNotMatchedInsertAll()
-        .execute(),
+        mocker.call.alias().merge().whenMatchedUpdateAll().whenNotMatchedInsertAll().execute()
     ]
 
     mocked_delta_table.assert_has_calls(expected_calls)
