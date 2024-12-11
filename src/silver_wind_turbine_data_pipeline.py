@@ -3,13 +3,11 @@ from pyspark.sql import SparkSession
 from pyspark.sql.dataframe import DataFrame
 from pyspark.sql.functions import coalesce, col, max, mean, rank, stddev, when
 from pyspark.sql.window import Window
+from utils import read_table, merge_all_dataset_into_table
 
 INPUT_TABLE_NAME = "bronze_wind_turbine_measurements"
 TARGET_TABLE_NAME = "silver_wind_turbine_measurements"
 
-
-def read_table(spark: SparkSession, table_name: str) -> DataFrame:
-    return spark.read.table(table_name)
 
 
 def deduplicate_dataset(df: DataFrame) -> DataFrame:
@@ -81,19 +79,6 @@ def drop_helper_columns(df: DataFrame) -> DataFrame:
     return df.drop(*columns_to_drop)
 
 
-def merge_dataset_into_table(
-    spark: SparkSession, df: DataFrame, target_table_name: str
-) -> None:
-    target_delta_table = DeltaTable.forName(
-        sparkSession=spark, tableOrViewName=target_table_name
-    )
-
-    target_delta_table.alias("target").merge(
-        df.alias("source"),
-        condition="source.turbine_id = target.turbine_id and source.timestamp = target.timestamp",
-    ).whenMatchedUpdateAll().whenNotMatchedInsertAll().execute()
-
-
 def main():
     spark = SparkSession.getActiveSession()
     # EXTRACT
@@ -117,7 +102,7 @@ def main():
     cleaned_df = drop_helper_columns(df=corrected_outliers_df)
 
     # LOAD
-    merge_dataset_into_table(
+    merge_all_dataset_into_table(
         spark=spark, df=cleaned_df, target_table_name=TARGET_TABLE_NAME
     )
 

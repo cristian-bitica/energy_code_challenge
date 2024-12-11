@@ -3,7 +3,7 @@ from datetime import datetime
 import pytest
 from pyspark.testing.utils import assertDataFrameEqual, assertSchemaEqual
 from pytest import MonkeyPatch
-from pytest_mock import MockerFixture
+
 
 import silver_wind_turbine_data_pipeline
 from silver_wind_turbine_data_pipeline import (
@@ -276,35 +276,6 @@ def test_drop_helper_columns(spark_session, dataset_schema):
     actual_df = drop_helper_columns(df=input_df)
 
     assertDataFrameEqual(actual=actual_df, expected=expected_df)
-
-
-def test_merge_dataset_into_table_hits_expected_calls(
-    spark_session, mocker: MockerFixture
-):
-
-    input_df = spark_session.createDataFrame(
-        [],
-        "`timestamp` timestamp, turbine_id integer, power_output double",
-    )
-    mocked_delta_table = mocker.Mock()
-    mocker.patch.object(DeltaTable, "read", mocked_delta_table)
-
-    expected_calls = [
-        mocker.call.alias("target"),
-        mocker.call.alias().merge(
-            input_df,
-            "source.turbine_id = target.turbine_id and source.timestamp = target.timestamp",
-        ),
-        mocker.call.alias().merge().whenMatchedUpdateAll(),
-        mocker.call.alias().merge().whenMatchedUpdateAll().whenNotMatchedInsertAll(),
-        mocker.call.alias()
-        .merge()
-        .whenMatchedUpdateAll()
-        .whenNotMatchedInsertAll()
-        .execute(),
-    ]
-
-    mocked_delta_table.assert_has_calls(expected_calls)
 
 
 def test_main_e2e(spark_session, monkeypatch: MonkeyPatch):
